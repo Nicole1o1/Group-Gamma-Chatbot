@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}Dashboard – Gamma Chatbot{% endblock %}
+
+{% block extra_style %}
+.dash-wrap { padding: 28px 32px; max-width: 1200px; }
+.dash-wrap h2 { font-size: 22px; margin-bottom: 24px; }
+
+/* Stat cards */
+.stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 28px; }
+.stat-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 22px 24px;
+}
+.stat-card .label { font-size: 13px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; }
+.stat-card .value { font-size: 32px; font-weight: 700; margin-top: 4px; color: var(--orange); }
+
+/* Sections */
+.dash-section {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    margin-bottom: 24px;
+}
+.dash-section h3 { font-size: 16px; margin-bottom: 16px; }
+
+/* Table */
+.dash-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.dash-table th {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 2px solid var(--border);
+    color: var(--text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.4px;
+}
+.dash-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+}
+.dash-table tr:last-child td { border-bottom: none; }
+.truncate { max-width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* FAQ bar */
+.faq-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+.faq-bar {
+    height: 24px;
+    background: var(--orange);
+    border-radius: 4px;
+    min-width: 8px;
+    transition: width 0.3s;
+}
+.faq-q { font-size: 13px; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.faq-count { font-size: 12px; color: var(--text-muted); font-weight: 600; min-width: 24px; text-align: right; }
+
+/* Daily chart */
+.day-chart { display: flex; align-items: flex-end; gap: 6px; height: 120px; }
+.day-bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.day-bar { width: 100%; background: var(--orange); border-radius: 4px 4px 0 0; min-height: 4px; }
+.day-label { font-size: 10px; color: var(--text-muted); }
+.day-count { font-size: 10px; font-weight: 600; }
+{% endblock %}
+
+{% block content %}
+<div class="dash-wrap">
+    <h2>Admin Dashboard</h2>
+
+    <div class="stat-row">
+        <div class="stat-card">
+            <div class="label">Total Users</div>
+            <div class="value">{{ stats.total_users }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Total Conversations</div>
+            <div class="value">{{ stats.total_chats }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Avg Answer Length</div>
+            <div class="value">{{ stats.avg_answer_len|int }} <span style="font-size:14px;color:var(--text-muted)">chars</span></div>
+        </div>
+    </div>
+
+    <!-- Daily usage chart -->
+    <div class="dash-section">
+        <h3>Daily Usage (Last 14 Days)</h3>
+        {% if stats.daily %}
+        <div class="day-chart">
+            {% set max_count = stats.daily|map(attribute='count')|max %}
+            {% for d in stats.daily %}
+            <div class="day-bar-wrap">
+                <div class="day-count">{{ d.count }}</div>
+                <div class="day-bar" style="height: {{ (d.count / max_count * 100)|int }}%"></div>
+                <div class="day-label">{{ d.day[5:] }}</div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p style="color:var(--text-muted);font-size:13px;">No data yet.</p>
+        {% endif %}
+    </div>
+
+    <!-- Frequently Asked Questions -->
+    <div class="dash-section">
+        <h3>Frequently Asked Questions</h3>
+        {% if stats.faq %}
+            {% set max_faq = stats.faq[0].count if stats.faq else 1 %}
+            {% for item in stats.faq %}
+            <div class="faq-item">
+                <div class="faq-bar" style="width: {{ (item.count / max_faq * 200)|int }}px"></div>
+                <div class="faq-q">{{ item.question }}</div>
+                <div class="faq-count">{{ item.count }}x</div>
+            </div>
+            {% endfor %}
+        {% else %}
+        <p style="color:var(--text-muted);font-size:13px;">No questions asked yet.</p>
+        {% endif %}
+    </div>
+
+    <!-- Recent conversations -->
+    <div class="dash-section">
+        <h3>Recent Conversations</h3>
+        {% if stats.recent %}
+        <table class="dash-table">
+            <thead>
+                <tr>
+                    <th>User</th>
+                    <th>Question</th>
+                    <th>Answer</th>
+                    <th>Time</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in stats.recent %}
+                <tr>
+                    <td>{{ item.username }}</td>
+                    <td class="truncate">{{ item.question }}</td>
+                    <td class="truncate">{{ item.answer }}</td>
+                    <td style="white-space:nowrap;">{{ item.created_at }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p style="color:var(--text-muted);font-size:13px;">No conversations yet.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
