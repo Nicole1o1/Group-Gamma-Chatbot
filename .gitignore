@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Vector database
+data/chroma/
+.env
+.env.*
+data/gamma.db
+data/gamma.db-*
