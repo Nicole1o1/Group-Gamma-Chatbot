@@ -1,4 +1,4 @@
-# UCU Chatbot Project
+# Gamma Chatbot Project
 
 This repository contains two versions of the university chatbot:
 
@@ -8,7 +8,7 @@ This repository contains two versions of the university chatbot:
 
 2. **RAG-based chatbot (new implementation)**  
    Located in `rag/` and `web/`. It uses document retrieval with Chroma and a local
-   LLM (Ollama) plus a Gradio web interface.
+   LLM (Ollama) plus a Flask app.
 
 ## RAG Quick Start
 
