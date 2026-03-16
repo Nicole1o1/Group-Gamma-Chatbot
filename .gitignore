@@ -7,6 +7,5 @@ __pycache__/
 data/chroma/
 .env
 .env.*
-!.env.example
 data/gamma.db
 data/gamma.db-*
