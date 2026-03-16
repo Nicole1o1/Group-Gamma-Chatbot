@@ -76,6 +76,17 @@
             border: 1px solid #FECACA;
         }
 
+        .legal-footer {
+            border-top: 1px solid var(--border);
+            margin: 24px 0 0;
+            padding: 16px 32px;
+            color: var(--text-muted);
+            font-size: 13px;
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
         {% block extra_style %}{% endblock %}
     </style>
 </head>
@@ -103,6 +114,11 @@
     {% endwith %}
 
     {% block content %}{% endblock %}
+    <footer class="legal-footer">
+        <a href="{{ url_for('terms_of_service') }}">Terms of Service</a>
+        <a href="{{ url_for('privacy_policy') }}">Privacy Policy</a>
+        <a href="{{ url_for('data_deletion') }}">Data Deletion Request</a>
+    </footer>
     {% block scripts %}{% endblock %}
 </body>
 </html>
