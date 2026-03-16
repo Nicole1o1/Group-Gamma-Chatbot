@@ -17,10 +17,12 @@ from web.db import (
     save_chat, get_user_chats,
     get_total_users, get_total_chats, get_frequent_questions,
     get_recent_chats, get_chats_per_day, get_avg_answer_length,
+    create_data_deletion_request,
 )
 from rag.pipeline import RAGPipeline
 from rag.generator import generate_answer
-from web.whatsapp_infobip import (
+from rag.sunbird import SunbirdClient, SunbirdError
+from web.whatsapp_meta import (
     extract_inbound_text_messages,
     is_whatsapp_configured,
     load_whatsapp_config,
@@ -28,7 +30,9 @@ from web.whatsapp_infobip import (
 )
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
-app.secret_key = "gamma-chatbot-secret-key-change-in-production"
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "change-me-in-production")
+
+init_db()
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -36,6 +40,13 @@ login_manager.login_view = "login"
 
 # Pipeline (loaded once)
 pipeline = None
+sunbird = SunbirdClient()
+
+SUPPORTED_SUNBIRD_TRANSLATION_LANGS = {"eng", "ach", "teo", "lug", "lgg", "nyn", "swa"}
+
+
+def get_public_base_url() -> str:
+    return os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
 
 
 def get_pipeline():
@@ -130,6 +141,45 @@ def logout():
     return redirect(url_for("login"))
 
 
+# ── Public legal/compliance pages ───────────────────────────────
+
+@app.route("/terms")
+def terms_of_service():
+    base_url = get_public_base_url()
+    return render_template("terms.html", base_url=base_url)
+
+
+@app.route("/privacy")
+def privacy_policy():
+    base_url = get_public_base_url()
+    return render_template("privacy.html", base_url=base_url)
+
+
+@app.route("/data-deletion", methods=["GET", "POST"])
+def data_deletion():
+    base_url = get_public_base_url()
+    if request.method == "POST":
+        full_name = (request.form.get("full_name") or "").strip()
+        contact_email = (request.form.get("contact_email") or "").strip()
+        whatsapp_number = (request.form.get("whatsapp_number") or "").strip()
+        details = (request.form.get("details") or "").strip()
+
+        if not full_name or not contact_email:
+            flash("Full name and email are required.", "error")
+            return render_template("data_deletion.html", base_url=base_url), 400
+
+        try:
+            create_data_deletion_request(full_name, contact_email, whatsapp_number, details)
+            flash("Your data deletion request has been received. We will contact you by email.")
+            return redirect(url_for("data_deletion"))
+        except Exception:
+            app.logger.exception("Failed to save data deletion request")
+            flash("Could not submit request right now. Please try again.", "error")
+            return render_template("data_deletion.html", base_url=base_url), 503
+
+    return render_template("data_deletion.html", base_url=base_url)
+
+
 # ── Student chat ─────────────────────────────────────────────────
 
 @app.route("/chat")
@@ -142,14 +192,51 @@ def chat():
 @app.route("/api/ask", methods=["POST"])
 @login_required
 def api_ask():
-    data = request.get_json()
-    question = (data.get("question") or "").strip()
-    if not question:
+    data = request.get_json(silent=True) or {}
+    original_question = (data.get("question") or "").strip()
+    if not original_question:
         return jsonify({"error": "Empty question"}), 400
 
-    answer = build_answer(question)
-    save_chat(current_user.id, question, answer)
-    return jsonify({"answer": answer})
+    retrieval_question = original_question
+    source_language = "eng"
+
+    if sunbird.is_configured():
+        try:
+            detected = sunbird.detect_language(original_question)
+            if (
+                detected
+                and detected != "eng"
+                and detected in SUPPORTED_SUNBIRD_TRANSLATION_LANGS
+            ):
+                translated = sunbird.translate(original_question, detected, "eng")
+                translated_text = (translated.get("text") or "").strip()
+                if translated_text:
+                    retrieval_question = translated_text
+                    source_language = detected
+        except SunbirdError:
+            app.logger.exception("Sunbird language detection/translation failed for inbound question")
+
+    try:
+        answer = build_answer(retrieval_question)
+    except Exception:
+        app.logger.exception("Failed to generate answer for question")
+        return jsonify({"error": "Could not generate an answer right now. Please try again."}), 503
+
+    final_answer = answer
+    if sunbird.is_configured() and source_language != "eng":
+        try:
+            translated_answer = sunbird.translate(answer, "eng", source_language)
+            translated_text = (translated_answer.get("text") or "").strip()
+            if translated_text:
+                final_answer = translated_text
+        except SunbirdError:
+            app.logger.exception("Sunbird translation failed for outbound answer")
+
+    try:
+        save_chat(current_user.id, original_question, final_answer)
+    except Exception:
+        app.logger.exception("Failed to persist chat history")
+    return jsonify({"answer": final_answer})
 
 
 @app.route("/api/whatsapp/status")
@@ -159,15 +246,124 @@ def whatsapp_status():
         {
             "configured": is_whatsapp_configured(),
             "base_url": cfg["base_url"],
-            "sender": cfg["sender"],
+            "phone_number_id": cfg["phone_number_id"],
+            "api_version": cfg["api_version"],
         }
     )
 
 
-@app.route("/webhooks/infobip/whatsapp", methods=["POST"])
-def infobip_whatsapp_webhook():
-    # Optional shared-secret validation for webhook protection
-    expected_token = os.getenv("INFOBIP_WEBHOOK_TOKEN", "").strip()
+@app.route("/api/sunbird/status")
+@login_required
+def sunbird_status():
+    cfg = sunbird.config
+    return jsonify(
+        {
+            "configured": sunbird.is_configured(),
+            "base_url": cfg.base_url,
+            "translate_endpoint": cfg.translate_endpoint,
+            "tts_endpoint": cfg.tts_endpoint,
+            "stt_endpoint": cfg.stt_endpoint,
+        }
+    )
+
+
+@app.route("/api/sunbird/translate", methods=["POST"])
+@login_required
+def sunbird_translate():
+    data = request.get_json(silent=True) or {}
+    text = (data.get("text") or "").strip()
+    source_language = (data.get("source_language") or "").strip()
+    target_language = (data.get("target_language") or "").strip()
+
+    if not text or not source_language or not target_language:
+        return jsonify({"error": "text, source_language, and target_language are required."}), 400
+
+    try:
+        result = sunbird.translate(text, source_language, target_language)
+        return jsonify({"text": result["text"], "raw": result["raw"]})
+    except SunbirdError as exc:
+        return jsonify({"error": str(exc)}), 502
+
+
+@app.route("/api/sunbird/tts", methods=["POST"])
+@login_required
+def sunbird_tts():
+    data = request.get_json(silent=True) or {}
+    text = (data.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "text is required."}), 400
+
+    speaker_id = int(data.get("speaker_id", 248))
+    response_mode = (data.get("response_mode") or "url").strip()
+    temperature = data.get("temperature")
+    max_new_audio_tokens = data.get("max_new_audio_tokens")
+
+    try:
+        result = sunbird.text_to_speech(
+            text=text,
+            speaker_id=speaker_id,
+            response_mode=response_mode,
+            temperature=float(temperature) if temperature is not None else None,
+            max_new_audio_tokens=int(max_new_audio_tokens)
+            if max_new_audio_tokens is not None
+            else None,
+        )
+        return jsonify({"audio_url": result["audio_url"], "raw": result["raw"]})
+    except ValueError:
+        return jsonify({"error": "speaker_id, temperature, or max_new_audio_tokens has invalid type."}), 400
+    except SunbirdError as exc:
+        return jsonify({"error": str(exc)}), 502
+
+
+@app.route("/api/sunbird/stt", methods=["POST"])
+@login_required
+def sunbird_stt():
+    audio = request.files.get("audio")
+    if audio is None:
+        return jsonify({"error": "audio file is required."}), 400
+
+    language = (request.form.get("language") or "").strip() or None
+    adapter = (request.form.get("adapter") or "").strip() or None
+
+    whisper_raw = (request.form.get("whisper") or "").strip().lower()
+    recognise_raw = (request.form.get("recognise_speakers") or "").strip().lower()
+
+    whisper = None if whisper_raw == "" else whisper_raw in {"1", "true", "yes", "on"}
+    recognise_speakers = (
+        None if recognise_raw == "" else recognise_raw in {"1", "true", "yes", "on"}
+    )
+
+    try:
+        result = sunbird.speech_to_text(
+            audio_bytes=audio.read(),
+            filename=audio.filename or "audio",
+            content_type=audio.content_type or "application/octet-stream",
+            language=language,
+            adapter=adapter,
+            whisper=whisper,
+            recognise_speakers=recognise_speakers,
+        )
+        return jsonify({"text": result["text"], "raw": result["raw"]})
+    except SunbirdError as exc:
+        return jsonify({"error": str(exc)}), 502
+
+
+@app.route("/webhooks/meta/whatsapp", methods=["GET"])
+def meta_whatsapp_webhook_verify():
+    cfg = load_whatsapp_config()
+    mode = request.args.get("hub.mode", "").strip()
+    token = request.args.get("hub.verify_token", "").strip()
+    challenge = request.args.get("hub.challenge", "")
+
+    if mode == "subscribe" and cfg["verify_token"] and token == cfg["verify_token"]:
+        return challenge, 200
+    return jsonify({"error": "Verification failed"}), 403
+
+
+@app.route("/webhooks/meta/whatsapp", methods=["POST"])
+def meta_whatsapp_webhook_receive():
+    # Backward-compatibility optional token check if defined.
+    expected_token = os.getenv("META_WHATSAPP_WEBHOOK_TOKEN", "").strip()
     if expected_token:
         provided = request.headers.get("X-Webhook-Token", "").strip()
         if provided != expected_token:
@@ -219,7 +415,6 @@ def dashboard():
 
 
 if __name__ == "__main__":
-    init_db()
     print("Loading pipeline...")
     get_pipeline()
     print("Pipeline ready. Starting Gamma Chatbot...")
