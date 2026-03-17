@@ -56,6 +56,10 @@ def get_public_base_url() -> str:
     return os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
 
 
+def should_initialize_rag_for_whatsapp() -> bool:
+    return os.getenv("WHATSAPP_INIT_PIPELINE", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def get_pipeline():
     global pipeline
     if pipeline is None:
@@ -393,13 +397,19 @@ def meta_whatsapp_webhook_receive():
         question = msg["text"]
         recipient = msg["from"]
 
-        try:
-            answer = build_answer(question)
-        except Exception:
-            app.logger.exception("Failed to build WhatsApp answer")
+        answer = ""
+        if pipeline is None and not should_initialize_rag_for_whatsapp():
             from rag.fallback import build_fallback_response
 
             answer = build_fallback_response(question)
+        else:
+            try:
+                answer = build_answer(question)
+            except Exception:
+                app.logger.exception("Failed to build WhatsApp answer")
+                from rag.fallback import build_fallback_response
+
+                answer = build_fallback_response(question)
 
         try:
             status_code, provider_response = send_whatsapp_text(recipient, answer)

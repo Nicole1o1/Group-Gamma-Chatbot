@@ -65,6 +65,8 @@ services:
         sync: false
       - key: META_WHATSAPP_WEBHOOK_TOKEN
         sync: false
+      - key: WHATSAPP_INIT_PIPELINE
+        value: "false"
       - key: SUNBIRD_API_KEY
         sync: false
       - key: SUNBIRD_BASE_URL
