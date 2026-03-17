@@ -19,8 +19,6 @@ from web.db import (
     get_recent_chats, get_chats_per_day, get_avg_answer_length,
     create_data_deletion_request,
 )
-from rag.pipeline import RAGPipeline
-from rag.generator import generate_answer
 from rag.sunbird import SunbirdClient, SunbirdError
 from web.whatsapp_meta import (
     extract_inbound_text_messages,
@@ -61,12 +59,16 @@ def get_public_base_url() -> str:
 def get_pipeline():
     global pipeline
     if pipeline is None:
+        from rag.pipeline import RAGPipeline
+
         pipeline = RAGPipeline()
     return pipeline
 
 
 def build_answer(question: str) -> str:
     """Run retrieval + generation for one question."""
+    from rag.generator import generate_answer
+
     pipe = get_pipeline()
     context = pipe.retrieve(question)
     if not context:
@@ -390,8 +392,21 @@ def meta_whatsapp_webhook_receive():
     for msg in inbound:
         question = msg["text"]
         recipient = msg["from"]
-        answer = build_answer(question)
-        status_code, provider_response = send_whatsapp_text(recipient, answer)
+
+        try:
+            answer = build_answer(question)
+        except Exception:
+            app.logger.exception("Failed to build WhatsApp answer")
+            from rag.fallback import build_fallback_response
+
+            answer = build_fallback_response(question)
+
+        try:
+            status_code, provider_response = send_whatsapp_text(recipient, answer)
+        except Exception:
+            app.logger.exception("Failed to send WhatsApp answer")
+            status_code, provider_response = 502, {"error": "Failed to send WhatsApp message"}
+
         processed.append(
             {
                 "to": recipient,
