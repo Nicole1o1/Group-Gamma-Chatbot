@@ -2,6 +2,7 @@
 
 import sys
 from pathlib import Path
+import time
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
@@ -50,6 +51,8 @@ pipeline = None
 sunbird = SunbirdClient()
 
 SUPPORTED_SUNBIRD_TRANSLATION_LANGS = {"eng", "ach", "teo", "lug", "lgg", "nyn", "swa"}
+_WHATSAPP_DEDUPE_TTL_SECONDS = 600
+_processed_whatsapp_message_ids: dict[str, float] = {}
 
 
 def get_public_base_url() -> str:
@@ -58,6 +61,27 @@ def get_public_base_url() -> str:
 
 def should_initialize_rag_for_whatsapp() -> bool:
     return os.getenv("WHATSAPP_INIT_PIPELINE", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def should_process_whatsapp_message(message_id: str) -> bool:
+    if not message_id:
+        return True
+
+    now = time.time()
+
+    expired = [
+        key
+        for key, timestamp in _processed_whatsapp_message_ids.items()
+        if now - timestamp > _WHATSAPP_DEDUPE_TTL_SECONDS
+    ]
+    for key in expired:
+        _processed_whatsapp_message_ids.pop(key, None)
+
+    if message_id in _processed_whatsapp_message_ids:
+        return False
+
+    _processed_whatsapp_message_ids[message_id] = now
+    return True
 
 
 def get_pipeline():
@@ -416,6 +440,19 @@ def meta_whatsapp_webhook_receive():
 
     processed = []
     for msg in inbound:
+        message_id = msg.get("id", "")
+        if not should_process_whatsapp_message(message_id):
+            processed.append(
+                {
+                    "id": message_id,
+                    "to": msg.get("from", ""),
+                    "status_code": 200,
+                    "ok": True,
+                    "provider": {"status": "duplicate_ignored"},
+                }
+            )
+            continue
+
         question = msg["text"]
         recipient = msg["from"]
         answer = build_whatsapp_answer(question)
@@ -428,6 +465,7 @@ def meta_whatsapp_webhook_receive():
 
         processed.append(
             {
+                "id": message_id,
                 "to": recipient,
                 "status_code": status_code,
                 "ok": 200 <= status_code < 300,

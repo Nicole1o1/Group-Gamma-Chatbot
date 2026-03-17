@@ -71,7 +71,7 @@ def extract_inbound_text_messages(payload: dict[str, Any]) -> list[dict[str, str
     """
     Parse Meta WhatsApp webhook payload and return text messages.
 
-    Output rows: {"from": "<phone>", "text": "<message>"}
+    Output rows: {"id": "<message-id>", "from": "<phone>", "text": "<message>"}
     """
     messages: list[dict[str, str]] = []
     entries = payload.get("entry")
@@ -100,12 +100,13 @@ def extract_inbound_text_messages(payload: dict[str, Any]) -> list[dict[str, str
                     continue
                 if message.get("type") != "text":
                     continue
+                message_id = str(message.get("id", "")).strip()
                 from_number = str(message.get("from", "")).strip()
                 text_obj = message.get("text")
                 text = ""
                 if isinstance(text_obj, dict):
                     text = str(text_obj.get("body", "")).strip()
                 if from_number and text:
-                    messages.append({"from": from_number, "text": text})
+                    messages.append({"id": message_id, "from": from_number, "text": text})
 
     return messages
