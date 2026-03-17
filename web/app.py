@@ -32,7 +32,16 @@ from web.whatsapp_meta import (
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "change-me-in-production")
 
-init_db()
+def initialize_database() -> bool:
+    try:
+        init_db()
+        return True
+    except Exception:
+        app.logger.exception("Database initialization failed during startup")
+        return False
+
+
+db_ready = initialize_database()
 
 login_manager = LoginManager()
 login_manager.init_app(app)
