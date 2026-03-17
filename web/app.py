@@ -82,6 +82,28 @@ def build_answer(question: str) -> str:
     return generate_answer(question, context, pipe.config.llm_model)
 
 
+def build_whatsapp_answer(question: str) -> str:
+    if should_initialize_rag_for_whatsapp():
+        return build_answer(question)
+
+    try:
+        from rag.config import load_config
+        from rag.lexical_search import lexical_search
+        from rag.generator import generate_answer
+
+        config = load_config()
+        lexical_lines = lexical_search(question, config)
+        context = [line for line, _ in lexical_lines[:4]]
+        if context:
+            return generate_answer(question, context, config.llm_model)
+    except Exception:
+        app.logger.exception("Failed to build lexical WhatsApp answer")
+
+    from rag.fallback import build_fallback_response
+
+    return build_fallback_response(question)
+
+
 class User(UserMixin):
     def __init__(self, user_dict):
         self.id = user_dict["id"]
@@ -396,20 +418,7 @@ def meta_whatsapp_webhook_receive():
     for msg in inbound:
         question = msg["text"]
         recipient = msg["from"]
-
-        answer = ""
-        if pipeline is None and not should_initialize_rag_for_whatsapp():
-            from rag.fallback import build_fallback_response
-
-            answer = build_fallback_response(question)
-        else:
-            try:
-                answer = build_answer(question)
-            except Exception:
-                app.logger.exception("Failed to build WhatsApp answer")
-                from rag.fallback import build_fallback_response
-
-                answer = build_fallback_response(question)
+        answer = build_whatsapp_answer(question)
 
         try:
             status_code, provider_response = send_whatsapp_text(recipient, answer)
