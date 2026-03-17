@@ -392,8 +392,21 @@ def meta_whatsapp_webhook_receive():
     for msg in inbound:
         question = msg["text"]
         recipient = msg["from"]
-        answer = build_answer(question)
-        status_code, provider_response = send_whatsapp_text(recipient, answer)
+
+        try:
+            answer = build_answer(question)
+        except Exception:
+            app.logger.exception("Failed to build WhatsApp answer")
+            from rag.fallback import build_fallback_response
+
+            answer = build_fallback_response(question)
+
+        try:
+            status_code, provider_response = send_whatsapp_text(recipient, answer)
+        except Exception:
+            app.logger.exception("Failed to send WhatsApp answer")
+            status_code, provider_response = 502, {"error": "Failed to send WhatsApp message"}
+
         processed.append(
             {
                 "to": recipient,
