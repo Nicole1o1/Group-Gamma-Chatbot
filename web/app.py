@@ -19,8 +19,6 @@ from web.db import (
     get_recent_chats, get_chats_per_day, get_avg_answer_length,
     create_data_deletion_request,
 )
-from rag.pipeline import RAGPipeline
-from rag.generator import generate_answer
 from rag.sunbird import SunbirdClient, SunbirdError
 from web.whatsapp_meta import (
     extract_inbound_text_messages,
@@ -61,12 +59,16 @@ def get_public_base_url() -> str:
 def get_pipeline():
     global pipeline
     if pipeline is None:
+        from rag.pipeline import RAGPipeline
+
         pipeline = RAGPipeline()
     return pipeline
 
 
 def build_answer(question: str) -> str:
     """Run retrieval + generation for one question."""
+    from rag.generator import generate_answer
+
     pipe = get_pipeline()
     context = pipe.retrieve(question)
     if not context:
