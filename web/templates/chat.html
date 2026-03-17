@@ -139,6 +139,30 @@
 }
 .chat-input-wrap button:hover { background: var(--orange-dark); }
 .chat-input-wrap button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.chat-input-wrap .mic-btn {
+    width: 42px;
+    min-width: 42px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--card);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+.chat-input-wrap .mic-btn svg { width: 18px; height: 18px; }
+.chat-input-wrap .mic-btn:hover { background: var(--orange-light); color: var(--orange); }
+.chat-input-wrap .mic-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+.chat-input-wrap .mic-btn.recording {
+    background: #FEE2E2;
+    color: #B91C1C;
+    border-color: #FCA5A5;
+}
 {% endblock %}
 
 {% block content %}
@@ -172,6 +196,14 @@
         <div class="chat-input-bar">
             <div class="chat-input-wrap">
                 <input type="text" id="questionInput" placeholder="Type your question..." autocomplete="off">
+                <button id="micBtn" class="mic-btn" type="button" title="Use microphone" aria-label="Use microphone">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                        <line x1="12" y1="19" x2="12" y2="23"></line>
+                        <line x1="8" y1="23" x2="16" y2="23"></line>
+                    </svg>
+                </button>
                 <button id="sendBtn" onclick="sendMessage()">Send</button>
             </div>
         </div>
@@ -184,10 +216,59 @@
 const chatMessages = document.getElementById('chatMessages');
 const questionInput = document.getElementById('questionInput');
 const sendBtn = document.getElementById('sendBtn');
+const micBtn = document.getElementById('micBtn');
 const sidebarList = document.getElementById('sidebarList');
 
 questionInput.addEventListener('keydown', function(e) {
     if (e.key === 'Enter' && !sendBtn.disabled) sendMessage();
+});
+
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition = null;
+let isRecording = false;
+
+if (SpeechRecognition) {
+    recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    recognition.onresult = function(event) {
+        let transcript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+            transcript += event.results[i][0].transcript;
+        }
+        questionInput.value = transcript.trim();
+    };
+
+    recognition.onend = function() {
+        isRecording = false;
+        micBtn.classList.remove('recording');
+    };
+} else {
+    micBtn.disabled = true;
+    micBtn.title = 'Microphone is not supported in this browser/context';
+}
+
+micBtn.addEventListener('click', function() {
+    if (!recognition) {
+        addMessage('Microphone is not available in this browser/context. Use Chrome/Edge on localhost or HTTPS.', 'msg-bot');
+        return;
+    }
+    if (!isRecording) {
+        try {
+            recognition.start();
+            isRecording = true;
+            micBtn.classList.add('recording');
+        } catch (e) {
+            isRecording = false;
+            micBtn.classList.remove('recording');
+        }
+        return;
+    }
+    recognition.stop();
+    isRecording = false;
+    micBtn.classList.remove('recording');
 });
 
 function addMessage(text, cls) {
@@ -217,16 +298,27 @@ function sendMessage() {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({question: q})
     })
-    .then(r => r.json())
-    .then(data => {
+    .then(async (r) => {
+        let data = {};
+        try {
+            data = await r.json();
+        } catch (e) {
+            data = {};
+        }
+        if (!r.ok) {
+            throw new Error(data.error || 'Something went wrong. Please try again.');
+        }
+        return data;
+    })
+    .then((data) => {
         chatMessages.removeChild(typing);
-        addMessage(data.answer || data.error, 'msg-bot');
+        addMessage(data.answer || 'No response returned.', 'msg-bot');
         sendBtn.disabled = false;
         addToSidebar(q);
     })
     .catch(err => {
         chatMessages.removeChild(typing);
-        addMessage('Something went wrong. Please try again.', 'msg-bot');
+        addMessage(err.message || 'Something went wrong. Please try again.', 'msg-bot');
         sendBtn.disabled = false;
     });
 }

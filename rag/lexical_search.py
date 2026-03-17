@@ -34,6 +34,33 @@ def _extract_terms(question: str) -> List[str]:
     return terms
 
 
+def _extract_phrases(question: str) -> List[str]:
+    """
+    Extract meaningful multi-word phrases from the query.
+
+    This is generic for all topics; it boosts exact phrase matches like
+    "computer science", "tuition fee", "dress code", etc.
+    """
+    tokens = re.findall(r"[a-z0-9]+", question.lower())
+    filtered = [t for t in tokens if t not in STOPWORDS and len(t) > 1]
+    if len(filtered) < 2:
+        return []
+
+    phrases: List[str] = []
+    seen: set[str] = set()
+
+    for size in (3, 2):
+        if len(filtered) < size:
+            continue
+        for i in range(0, len(filtered) - size + 1):
+            phrase = " ".join(filtered[i : i + size])
+            if phrase not in seen:
+                seen.add(phrase)
+                phrases.append(phrase)
+
+    return phrases
+
+
 def _read_text_file(path: Path) -> str:
     try:
         return path.read_text(encoding="utf-8", errors="ignore")
@@ -66,6 +93,7 @@ def lexical_search(
     context rather than isolated single lines.
     """
     terms = _extract_terms(question)
+    phrases = _extract_phrases(question)
     if not terms:
         return []
 
@@ -104,9 +132,12 @@ def lexical_search(
             for j in range(start, end):
                 used_indices.add(j)
 
-            # Score: line-level hits (most important) + window-level breadth
+            # Score: line-level hits + window-level breadth + phrase matches.
+            # Phrase matching is topic-agnostic and improves precision across
+            # all query types.
             unique_hits = sum(1 for term in terms if term in window.lower())
-            score = (hits * 2) + unique_hits
+            phrase_hits = sum(1 for phrase in phrases if phrase in window.lower())
+            score = (hits * 2) + unique_hits + (phrase_hits * 3)
             scored.append((score, window, {"source": str(source_path)}))
 
     scored.sort(key=lambda x: x[0], reverse=True)

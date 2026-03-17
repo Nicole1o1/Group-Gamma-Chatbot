@@ -7,9 +7,10 @@ university chatbot. It is separate from the legacy zero-shot version in
 ## What This Adds
 
 - Document ingestion (PDF, TXT, MD) into a vector database
-- Semantic retrieval using Chroma
-- Local LLM generation via Ollama (e.g., `mistral`)
-- A Gradio web UI in `web/`
+- Semantic retrieval using Qdrant Cloud
+- Hosted LLM generation via Groq API
+- Supabase Storage sync for source documents
+- Flask web UI in `web/`
 
 ## Quick Start
 
@@ -18,7 +19,7 @@ university chatbot. It is separate from the legacy zero-shot version in
    pip install -r ../requirements_rag.txt
    ```
 
-2. Add documents to `../data/docs/` (PDF, TXT, MD).
+2. Upload documents to Supabase Storage bucket (`SUPABASE_STORAGE_BUCKET`) and/or add local documents to `../data/docs/`.
 
 3. Ingest documents:
    ```bash
@@ -36,33 +37,39 @@ university chatbot. It is separate from the legacy zero-shot version in
 - `document_loaders.py` — load PDFs and text files
 - `chunking.py` — split documents into overlapping chunks
 - `embeddings.py` — sentence-transformer embeddings
-- `vector_store.py` — Chroma vector database wrapper
-- `generator.py` — Ollama LLM generation
+- `vector_store.py` — Qdrant vector database wrapper
+- `generator.py` — Groq LLM generation
 - `pipeline.py` — retrieval + generation pipeline
-- `ingest.py` — command-line ingestion pipeline
+- `ingest.py` — command-line ingestion pipeline + Supabase Storage sync
 
 ## Environment Variables (Optional)
 
 - `RAG_DATA_DIR` (default: `data`)
 - `RAG_DOCS_DIR` (default: `data/docs`)
-- `RAG_CHROMA_DIR` (default: `data/chroma`)
 - `RAG_COLLECTION` (default: `ucu_docs`)
 - `RAG_EMBED_MODEL` (default: `all-MiniLM-L6-v2`)
-- `RAG_LLM_MODEL` (default: `mistral`)
+- `GROQ_API_KEY` (required)
+- `GROQ_MODEL` (default: `llama-3.1-8b-instant`)
+- `GROQ_BASE_URL` (optional override)
+- `QDRANT_URL` (required)
+- `QDRANT_API_KEY` (required for private clusters)
+- `SUPABASE_URL` (required for storage sync)
+- `SUPABASE_SERVICE_KEY` (required for storage sync)
+- `SUPABASE_STORAGE_BUCKET` (required for storage sync)
+- `SUPABASE_STORAGE_PREFIX` (optional)
 - `RAG_CHUNK_SIZE` (default: `300` words)
 - `RAG_CHUNK_OVERLAP` (default: `60` words)
-- `RAG_TOP_K` (default: `4`)
+- `RAG_TOP_K` (default: `6`)
 - `RAG_MAX_DISTANCE` (default: `1.1`)
 - `RAG_OCR_ENABLED` (default: `false`)
-- `RAG_LEXICAL_TOP_N` (default: `6`)
+- `RAG_LEXICAL_TOP_N` (default: `8`)
 - `RAG_LEXICAL_MIN_HITS` (default: `1`)
 
 ## Notes
 
-- Ollama must be running locally with the chosen model pulled.
-- If you re-ingest, use `python -m rag.ingest --reset` to clear the collection.
+- Groq API key must be configured.
+- If you re-ingest, use `python -m rag.ingest --reset` to clear the Qdrant collection.
 - When retrieval confidence is low, the chatbot returns a human fallback response.
-- See `metrics.md` for evaluation metrics and how to report them.
 
 ## OCR (Scanned PDFs)
 
