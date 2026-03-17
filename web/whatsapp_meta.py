@@ -1,0 +1,111 @@
+"""Meta WhatsApp Cloud API helper utilities."""
+
+from __future__ import annotations
+
+import os
+from typing import Any
+
+import requests
+
+
+def _normalize_base_url(base_url: str) -> str:
+    base = base_url.strip()
+    if not base:
+        return "https://graph.facebook.com"
+    return base.rstrip("/")
+
+
+def load_whatsapp_config() -> dict[str, str]:
+    """Load WhatsApp Cloud API settings from environment variables."""
+    return {
+        "base_url": _normalize_base_url(os.getenv("META_GRAPH_BASE_URL", "https://graph.facebook.com")),
+        "api_version": os.getenv("META_GRAPH_API_VERSION", "v20.0").strip(),
+        "access_token": os.getenv("META_WHATSAPP_ACCESS_TOKEN", "").strip(),
+        "phone_number_id": os.getenv("META_WHATSAPP_PHONE_NUMBER_ID", "").strip(),
+        "verify_token": os.getenv("META_WHATSAPP_VERIFY_TOKEN", "").strip(),
+    }
+
+
+def is_whatsapp_configured() -> bool:
+    cfg = load_whatsapp_config()
+    return bool(cfg["access_token"] and cfg["phone_number_id"])
+
+
+def send_whatsapp_text(to_number: str, text: str) -> tuple[int, dict[str, Any]]:
+    """
+    Send an outbound WhatsApp text message using Meta WhatsApp Cloud API.
+
+    Returns: (status_code, response_json_or_error)
+    """
+    cfg = load_whatsapp_config()
+    if not cfg["access_token"] or not cfg["phone_number_id"]:
+        return 500, {"error": "WhatsApp integration is not configured."}
+
+    endpoint = (
+        f"{cfg['base_url']}/{cfg['api_version']}/"
+        f"{cfg['phone_number_id']}/messages"
+    )
+    headers = {
+        "Authorization": f"Bearer {cfg['access_token']}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": to_number,
+        "type": "text",
+        "text": {"preview_url": False, "body": text},
+    }
+
+    try:
+        response = requests.post(endpoint, json=payload, headers=headers, timeout=30)
+        data = response.json() if response.content else {}
+        return response.status_code, data
+    except requests.RequestException as exc:
+        return 502, {"error": f"Failed to call Meta WhatsApp API: {exc}"}
+    except ValueError:
+        return response.status_code, {"raw": response.text}
+
+
+def extract_inbound_text_messages(payload: dict[str, Any]) -> list[dict[str, str]]:
+    """
+    Parse Meta WhatsApp webhook payload and return text messages.
+
+    Output rows: {"from": "<phone>", "text": "<message>"}
+    """
+    messages: list[dict[str, str]] = []
+    entries = payload.get("entry")
+    if not isinstance(entries, list):
+        return messages
+
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        changes = entry.get("changes")
+        if not isinstance(changes, list):
+            continue
+
+        for change in changes:
+            if not isinstance(change, dict):
+                continue
+            value = change.get("value")
+            if not isinstance(value, dict):
+                continue
+            inbound = value.get("messages")
+            if not isinstance(inbound, list):
+                continue
+
+            for message in inbound:
+                if not isinstance(message, dict):
+                    continue
+                if message.get("type") != "text":
+                    continue
+                from_number = str(message.get("from", "")).strip()
+                text_obj = message.get("text")
+                text = ""
+                if isinstance(text_obj, dict):
+                    text = str(text_obj.get("body", "")).strip()
+                if from_number and text:
+                    messages.append({"from": from_number, "text": text})
+
+    return messages
