@@ -15,7 +15,8 @@ class RAGPipeline:
         self.config = config or load_config()
         self.embedder = EmbeddingModel(self.config.embedding_model)
         self.store = VectorStore(
-            self.config.chroma_dir,
+            self.config.qdrant_url,
+            self.config.qdrant_api_key,
             self.config.collection_name,
             self.embedder,
         )
@@ -25,7 +26,7 @@ class RAGPipeline:
         Combine semantic (vector) and lexical (keyword) search.
         Always returns context — never gates on a confidence score.
         """
-        # 1) Semantic search from Chroma
+        # 1) Semantic search from Qdrant
         semantic_chunks = self.store.query(question, self.config.top_k)
         semantic_texts = [chunk.text for chunk in semantic_chunks]
 
